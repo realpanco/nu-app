@@ -8,46 +8,64 @@ on:
 jobs:
   build-unsigned-ipa:
     name: Compilar IPA (Xcode macOS)
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
-      - name: Checkout
+      - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: ⚙️ Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
-      - name: Instalar dependencias
+      - name: 📦 Instalar dependencias
         run: npm ci
 
-      - name: Pré-construir projeto nativo iOS (expo prebuild)
-        run: npx expo prebuild --platform ios
+      - name: 🛠️ Pre-construir projeto nativo iOS (expo prebuild)
+        run: npx expo prebuild --platform ios --clean
 
-      - name: Compilar App nativo ARM64 para Dispositivo Fisico
+      - name: ☕ CocoaPods Install
         run: |
           cd ios
-          xcodebuild -workspace MeuApp.xcworkspace \
-                     -scheme MeuApp \
-                     -configuration Release \
-                     -destination 'generic/platform=iOS' \
-                     -archivePath ../build/MeuApp.xcarchive \
-                     CODE_SIGN_IDENTITY="" \
-                     CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGNING_ALLOWED=NO \
-                     archive
+          pod install
 
-      - name: Empacotar estrutura Payload e gerar .IPA
+      - name: 🔍 Detectar Workspace e Scheme
         run: |
-          mkdir -p Payload
-          cp -r build/MeuApp.xcarchive/Products/Applications/*.app Payload/
-          zip -r meu-app-nubank.ipa Payload
-          mkdir -p artifacts
-          mv meu-app-nubank.ipa artifacts/
+          cd ios
+          WORKSPACE_NAME=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME_NAME=$(xcodebuild -list -workspace "$WORKSPACE_NAME" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | tr -d ' ' | head -n 1)
+          echo "WORKSPACE=$WORKSPACE_NAME" >> $GITHUB_ENV
+          echo "SCHEME=$SCHEME_NAME" >> $GITHUB_ENV
+          echo "Compilando Workspace: $WORKSPACE_NAME com Scheme: $SCHEME_NAME"
 
-      - name: Disponibilizar IPA para Download no GitHub
+      - name: 🔨 Compilar App nativo (Unsigned - Sem Apple ID)
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: 📦 Empacotar estrutura Payload e gerar .IPA
+        run: |
+          mkdir -p build-output/Payload
+          APP_PATH=$(find ios/build/Build/Products/Release-iphoneos -name "*.app" | head -n 1)
+          echo "Encontrado App em: $APP_PATH"
+          cp -r "$APP_PATH" build-output/Payload/
+          cd build-output
+          zip -r -y meu-app-nubank.ipa Payload
+          cd ..
+
+      - name: 📤 Disponibilizar IPA para Download no GitHub
         uses: actions/upload-artifact@v4
         with:
           name: meu-app-nubank-ipa
-          path: artifacts/meu-app-nubank.ipa
+          path: build-output/meu-app-nubank.ipa
+          retention-days: 14
