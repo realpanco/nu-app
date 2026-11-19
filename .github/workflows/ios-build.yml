@@ -26,43 +26,56 @@ jobs:
         run: npx expo prebuild --platform ios --clean
 
       - name: ☕ CocoaPods Install
-        run: |
-          cd ios
-          pod install
+        working-directory: ./ios
+        run: pod install
 
-      - name: 🔍 Detectar Workspace e Scheme
+      - name: 🔨 Compilar e Arquivar (Unsigned - Sem Apple ID)
         run: |
-          cd ios
-          WORKSPACE_NAME=$(ls -d *.xcworkspace | head -n 1)
-          SCHEME_NAME=$(xcodebuild -list -workspace "$WORKSPACE_NAME" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | tr -d ' ' | head -n 1)
-          echo "WORKSPACE=$WORKSPACE_NAME" >> $GITHUB_ENV
-          echo "SCHEME=$SCHEME_NAME" >> $GITHUB_ENV
-          echo "Compilando Workspace: $WORKSPACE_NAME com Scheme: $SCHEME_NAME"
+          WORKSPACE_NAME=$(ls ios | grep .xcworkspace | head -n 1)
+          SCHEME_NAME=$(basename "$WORKSPACE_NAME" .xcworkspace)
+          echo "Workspace: $WORKSPACE_NAME"
+          echo "Scheme: $SCHEME_NAME"
+          mkdir -p build
 
-      - name: 🔨 Compilar App nativo (Unsigned - Sem Apple ID)
-        run: |
-          cd ios
-          xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
+          xcodebuild clean archive \
+            -workspace "ios/$WORKSPACE_NAME" \
+            -scheme "$SCHEME_NAME" \
             -configuration Release \
+            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -archivePath ../build/App.xcarchive \
+            -archivePath "$PWD/build/$SCHEME_NAME.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            clean archive
+            CODE_SIGN_ENTITLEMENTS=""
 
       - name: 📦 Empacotar estrutura Payload e gerar .IPA
         run: |
           mkdir -p build-output/Payload
-          APP_PATH=$(find build/App.xcarchive/Products/Applications -name "*.app" 2>/dev/null | head -n 1)
+
+          # Procura o .app no build gerado
+          APP_PATH=$(find build -name "*.app" 2>/dev/null | head -n 1)
+
+          # Se nao achou no build local, busca no arquivo default do Xcode
           if [ -z "$APP_PATH" ]; then
-            echo "Buscando .app em todo o diretorio..."
-            APP_PATH=$(find . -name "*.app" | head -n 1)
+            echo "Buscando nos arquivos do Xcode..."
+            APP_PATH=$(find ~/Library/Developer/Xcode/Archives -name "*.app" 2>/dev/null | head -n 1)
           fi
-          echo "Encontrado App em: $APP_PATH"
+
+          # Fallback geral
+          if [ -z "$APP_PATH" ]; then
+            echo "Buscando em todo o workspace..."
+            APP_PATH=$(find . -name "*.app" 2>/dev/null | head -n 1)
+          fi
+
+          echo "Aplicativo encontrado em: $APP_PATH"
+          if [ -z "$APP_PATH" ]; then
+            echo "ERRO: Nenhum pacote .app foi localizado."
+            find build || true
+            find ~/Library/Developer/Xcode/Archives 2>/dev/null || true
+            exit 1
+          fi
+
           cp -R "$APP_PATH" build-output/Payload/
           cd build-output
           zip -r -y meu-app-nubank.ipa Payload
