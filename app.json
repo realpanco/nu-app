@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "MeuApp",
+    "slug": "meu-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.meuapp.ios",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Este aplicativo precisa de acesso à câmera para captura de fotos.",
+        "NSPhotoLibraryUsageDescription": "Este aplicativo precisa de acesso à galeria de fotos."
+      }
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}

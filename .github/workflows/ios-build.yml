@@ -1,0 +1,32 @@
+name: Build iOS IPA Remoto
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-ios:
+    name: Compilar IPA (Runner macOS)
+    runs-on: macos-14
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Instalar Dependências
+        run: npm ci
+
+      - name: Setup EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Configurar e Compilar via EAS Build Remoto
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build --platform ios --profile preview --non-interactive

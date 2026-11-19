@@ -1,0 +1,23 @@
+{
+  "name": "meu-app-ios",
+  "version": "1.0.0",
+  "description": "Aplicativo iOS compilado via CI/CD macOS remoto sem Mac físico",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "build:ios:local": "eas build --platform ios --local",
+    "build:ios": "eas build --platform ios"
+  },
+  "dependencies": {
+    "expo": "~52.0.0",
+    "expo-asset": "~11.0.5",
+    "expo-font": "~13.0.4",
+    "expo-status-bar": "~2.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.5"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0"
+  },
+  "private": true
+}
