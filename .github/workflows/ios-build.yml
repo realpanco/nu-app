@@ -1,16 +1,16 @@
-name: Build iOS IPA Remoto
+name: Gerar IPA iOS sem Conta Paga Apple
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ master, main ]
 
 jobs:
-  build-ios:
-    name: Compilar IPA (Runner macOS)
+  build-unsigned-ipa:
+    name: Compilar IPA (Xcode macOS)
     runs-on: macos-14
     steps:
-      - name: Checkout do Repositório
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -19,14 +19,35 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Instalar Dependências
+      - name: Instalar dependencias
         run: npm ci
 
-      - name: Setup EAS CLI
-        run: npm install -g eas-cli
+      - name: Pré-construir projeto nativo iOS (expo prebuild)
+        run: npx expo prebuild --platform ios
 
-      - name: Configurar e Compilar via EAS Build Remoto
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - name: Compilar App nativo ARM64 para Dispositivo Fisico
         run: |
-          eas build --platform ios --profile preview --non-interactive
+          cd ios
+          xcodebuild -workspace meuappios.xcworkspace \
+                     -scheme meuappios \
+                     -configuration Release \
+                     -destination 'generic/platform=iOS' \
+                     -archivePath ../build/meuappios.xcarchive \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGNING_ALLOWED=NO \
+                     archive
+
+      - name: Empacotar estrutura Payload e gerar .IPA
+        run: |
+          mkdir -p Payload
+          cp -r build/meuappios.xcarchive/Products/Applications/*.app Payload/
+          zip -r meu-app-nubank.ipa Payload
+          mkdir -p artifacts
+          mv meu-app-nubank.ipa artifacts/
+
+      - name: Disponibilizar IPA para Download no GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: meu-app-nubank-ipa
+          path: artifacts/meu-app-nubank.ipa
