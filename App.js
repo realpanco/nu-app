@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,8 +9,9 @@ import {
   StatusBar,
   Modal,
   Dimensions,
-  Animated,
+  TextInput,
   Platform,
+  Switch,
   Alert,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
@@ -18,15 +19,102 @@ import * as LocalAuthentication from 'expo-local-authentication';
 
 const { width } = Dimensions.get('window');
 
+// Tokens de Design Nubank 2026 adaptativos (Dark OLED oficial das referências com suporte refinado)
+const NU = {
+  purple: '#7A00C7',
+  purpleLight: '#820AD1',
+  purpleDark: '#530082',
+  purpleSoft: '#261738',
+  purpleBadge: '#6E1FA3',
+  bg: '#000000',
+  cardBg: '#1C1C1E',
+  surface: '#161618',
+  divider: '#1A1A1E',
+  text: '#FFFFFF',
+  textSub: '#C4C4C6',
+  muted: '#8E8E93',
+  green: '#00C49F',
+  greenSoft: '#10393B',
+  blue: '#009EE3',
+  red: '#E02424',
+};
+
+const formatBRL = (value) => {
+  const abs = Math.abs(Number(value) || 0);
+  const fixed = abs.toFixed(2).replace('.', ',');
+  const parts = fixed.split(',');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${value < 0 ? '- ' : ''}R$ ${parts.join(',')}`;
+};
+
+// Ícone oficial do Pix em geometria pura com proporção exata
+const PixGlyph = ({ size = 22, color = '#FFFFFF' }) => {
+  const s = size * 0.31;
+  const gap = size * 0.09;
+  const box = s * 2 + gap;
+  return (
+    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+      <View
+        style={{
+          width: box,
+          height: box,
+          transform: [{ rotate: '45deg' }],
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          justifyContent: 'space-between',
+          alignContent: 'space-between',
+        }}
+      >
+        {[0, 1, 2, 3].map((idx) => (
+          <View
+            key={idx}
+            style={{
+              width: s,
+              height: s,
+              borderRadius: s * 0.28,
+              borderWidth: 1.75,
+              borderColor: color,
+            }}
+          />
+        ))}
+      </View>
+    </View>
+  );
+};
+
+// Máscara fiel do Nubank ao ocultar valores
+const MaskedValue = ({ visible, text, style, dotSize = 8 }) => {
+  if (visible) return <Text style={style}>{text}</Text>;
+  return (
+    <View style={[styles.maskedRow, { height: (style?.fontSize || 20) * 1.25 }]}>
+      {[0, 1, 2, 3].map((i) => (
+        <View
+          key={i}
+          style={{
+            width: dotSize,
+            height: dotSize,
+            borderRadius: dotSize / 2,
+            backgroundColor: '#FFFFFF',
+            marginRight: 5,
+          }}
+        />
+      ))}
+    </View>
+  );
+};
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [activeTab, setActiveTab] = useState('home');
-  const [pixModalVisible, setPixModalVisible] = useState(false);
-  const [cardsModalVisible, setCardsModalVisible] = useState(false);
-  const [transferScreenVisible, setTransferScreenVisible] = useState(false);
 
-  // Authenticate on startup with Face ID / Touch ID / Biometrics
+  // Estados dinâmicos da conta
+  const [balance, setBalance] = useState(3570.28);
+  const [invoiceTotal] = useState(16.44);
+  const [creditLimit] = useState(1000.0);
+  const [streetMode, setStreetMode] = useState(true);
+
+  // Autenticação Face ID / Touch ID ao abrir
   useEffect(() => {
     handleBiometricAuth();
   }, []);
@@ -37,7 +125,6 @@ export default function App() {
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
 
       if (!hasHardware || !isEnrolled) {
-        // Fallback for web or devices without biometrics configured
         setIsAuthenticated(true);
         return;
       }
@@ -51,87 +138,204 @@ export default function App() {
 
       if (result.success) {
         setIsAuthenticated(true);
-      } else {
-        // User cancelled or failed
       }
     } catch (e) {
       setIsAuthenticated(true);
     }
   };
 
-  // Quick Action Buttons directly matched to user screenshots
+  const [transactions, setTransactions] = useState([
+    {
+      id: 't1',
+      type: 'pix_out',
+      title: 'Transferência enviada',
+      subtitle: 'MATHEUS BARROS',
+      amount: -0.02,
+      date: 'Hoje, 11:40',
+      method: 'Pix',
+    },
+    {
+      id: 't2',
+      type: 'pix_in',
+      title: 'Transferência recebida',
+      subtitle: 'Lucas Mendes',
+      amount: 850.0,
+      date: 'Ontem',
+      method: 'Pix',
+    },
+    {
+      id: 't3',
+      type: 'bill',
+      title: 'Pagamento de fatura',
+      subtitle: 'Cartão Nubank',
+      amount: -74.8,
+      date: '17 NOV',
+      method: 'Débito',
+    },
+    {
+      id: 't4',
+      type: 'yield',
+      title: 'Rendimento da conta',
+      subtitle: '100% do CDI líquido',
+      amount: 14.62,
+      date: '16 NOV',
+      method: 'Conta',
+    },
+  ]);
+
+  const [creditPurchases] = useState([
+    { id: 'c1', merchant: 'iFood *Restaurante', category: 'Alimentação', amount: 16.44, date: 'Hoje', icon: 'restaurant-outline' },
+    { id: 'c2', merchant: 'Amazon.com.br', category: 'Eletrônicos', amount: 349.5, date: '12 NOV', icon: 'cart-outline' },
+    { id: 'c3', merchant: 'Uber *Trip', category: 'Transporte', amount: 28.4, date: '10 NOV', icon: 'car-outline' },
+  ]);
+
+  const [cards, setCards] = useState([
+    { id: 'card1', name: 'Cartão físico', label: 'Ultravioleta', last4: '4109', type: 'physical', blocked: false },
+    { id: 'card2', name: 'Compras online', label: 'Virtual', last4: '8842', type: 'virtual', blocked: false },
+    { id: 'card3', name: 'Assinaturas', label: 'Virtual', last4: '2915', type: 'virtual', blocked: false },
+  ]);
+
+  // Controle de Modais / Telas
+  const [pixModalVisible, setPixModalVisible] = useState(false);
+  const [pixStep, setPixStep] = useState('menu'); // 'menu' | 'amount' | 'recipient' | 'receipt' | 'schedule'
+  const [pixInputAmount, setPixInputAmount] = useState('0,02');
+  const [pixRecipient, setPixRecipient] = useState('MATHEUS BARROS');
+  const [lastReceipt, setLastReceipt] = useState(null);
+
+  const [accountModalVisible, setAccountModalVisible] = useState(false);
+  const [extractSearch, setExtractSearch] = useState('');
+  const [creditModalVisible, setCreditModalVisible] = useState(false);
+  const [cardsModalVisible, setCardsModalVisible] = useState(false);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
+
+  const availableLimit = Math.max(0, creditLimit - invoiceTotal);
+  const invoicePercent = Math.min(100, (invoiceTotal / creditLimit) * 100);
+
+  const filteredTransactions = useMemo(() => {
+    if (!extractSearch.trim()) return transactions;
+    const q = extractSearch.toLowerCase();
+    return transactions.filter(
+      (t) => t.title.toLowerCase().includes(q) || t.subtitle.toLowerCase().includes(q)
+    );
+  }, [transactions, extractSearch]);
+
+  // Ações Rápidas Oficiais Nubank 2026 com badges das referências
   const quickActions = [
     {
       id: '1',
       label: 'Área Pix e\nTransferir',
       icon: 'grid-outline',
-      type: 'ion',
-      action: () => setPixModalVisible(true),
+      lib: 'ion',
+      action: () => {
+        setPixStep('menu');
+        setPixModalVisible(true);
+      },
     },
-    {
-      id: '2',
-      label: 'Pagar',
-      icon: 'barcode-outline',
-      type: 'ion',
-      action: () => {},
-    },
+    { id: '2', label: 'Pagar', icon: 'barcode-outline', lib: 'ion', action: () => setCreditModalVisible(true) },
     {
       id: '3',
       label: 'Pegar\nemprestado',
       icon: 'hand-coin-outline',
-      type: 'mci',
+      lib: 'mci',
       badge: 'R$ 2.000',
       action: () => {},
     },
-    {
-      id: '4',
-      label: 'Recarga de\ncelular',
-      icon: 'phone-portrait-outline',
-      type: 'ion',
-      action: () => {},
-    },
+    { id: '4', label: 'Recarga de\ncelular', icon: 'smartphone', lib: 'feather', action: () => {} },
     {
       id: '5',
-      label: 'Caixinhas e\nInvestir',
+      label: 'Caixinha\nTurbo',
       icon: 'cash-multiple',
-      type: 'mci',
-      action: () => {},
+      lib: 'mci',
+      badge: '115% CDI',
+      action: () => setActiveTab('planning'),
     },
-    {
-      id: '6',
-      label: 'Cobrar',
-      icon: 'cash-outline',
-      type: 'ion',
-      action: () => {},
-    },
+    { id: '6', label: 'Cobrar', icon: 'chatbubble-ellipses-outline', lib: 'ion', action: () => {} },
+    { id: '7', label: 'Depositar', icon: 'arrow-down-left', lib: 'feather', action: () => {} },
   ];
 
-  // Feed Carousel Cards
-  const promoCards = [
+  // Cards informativos do Feed
+  const noticeCards = [
     {
-      id: '1',
+      id: 'n1',
       prefix: 'Pix no Crédito: ',
       text: 'faça pagamentos sem usar o saldo da conta.',
       highlight: true,
       hasIcon: true,
     },
     {
-      id: '2',
-      prefix: 'Facilite seus planos futuros: ',
-      text: 'guarde dinheiro nas Caixinhas.',
+      id: 'n2',
+      prefix: 'CDBs com as ',
+      text: 'maiores taxas de rendimento para você investir.',
       highlight: false,
       hasIcon: false,
     },
     {
-      id: '3',
-      prefix: 'Concorra a prêmios: ',
-      text: 'Nubank Vida tem sorteios de R$ 50 mil todo mês.',
+      id: 'n3',
+      prefix: 'O Modo Escuro ',
+      text: 'já está disponível no app! Saiba mais.',
       highlight: false,
       hasIcon: false,
     },
   ];
 
-  // If locked, show authentic Nubank lock screen
+  const pixContacts = [
+    { id: 'p1', name: 'MATHEUS BARROS', bank: 'Nu Pagamentos S.A.', initials: 'MB' },
+    { id: 'p2', name: 'Lucas Mendes', bank: 'Nu Pagamentos S.A.', initials: 'LM' },
+    { id: 'p3', name: 'Mariana Silva', bank: 'Itaú Unibanco S.A.', initials: 'MS' },
+  ];
+
+  // Fluxo real de envio/agendamento de Pix
+  const handleConfirmPix = (recipientName) => {
+    const parsed = parseFloat(pixInputAmount.replace(',', '.'));
+    if (!parsed || parsed <= 0 || parsed > balance) return;
+
+    const finalRecipient = recipientName || pixRecipient.trim() || 'Chave Pix';
+    setBalance((prev) => +(prev - parsed).toFixed(2));
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const newTx = {
+      id: `tx_${Date.now()}`,
+      type: 'pix_out',
+      title: 'Transferência enviada',
+      subtitle: finalRecipient,
+      amount: -parsed,
+      date: `Hoje, ${timeStr}`,
+      method: 'Pix',
+    };
+
+    setTransactions((prev) => [newTx, ...prev]);
+    setLastReceipt({
+      amount: parsed,
+      recipient: finalRecipient,
+      date: `Hoje às ${timeStr}`,
+      id: `E1823612020261119${Math.floor(100000 + Math.random() * 899999)}`,
+    });
+    setPixStep('receipt');
+  };
+
+  const toggleBlockCard = (id) => {
+    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, blocked: !c.blocked } : c)));
+  };
+
+  const createVirtualCard = () => {
+    const rand4 = String(Math.floor(1000 + Math.random() * 9000));
+    setCards((prev) => [
+      ...prev,
+      {
+        id: `card_${Date.now()}`,
+        name: `Virtual #${prev.length}`,
+        label: 'Virtual',
+        last4: rand4,
+        type: 'virtual',
+        blocked: false,
+      },
+    ]);
+  };
+
+  // Se bloqueado, exibe tela de desbloqueio Face ID / Biometria
   if (!isAuthenticated) {
     return (
       <SafeAreaView style={styles.lockScreen}>
@@ -148,7 +352,7 @@ export default function App() {
             onPress={handleBiometricAuth}
             activeOpacity={0.8}
           >
-            <Ionicons name="scan-outline" size={32} color="#FFFFFF" />
+            <Ionicons name="scan-outline" size={30} color="#FFFFFF" />
             <Text style={styles.biometricBtnText}>Desbloquear com Biometria</Text>
           </TouchableOpacity>
 
@@ -164,98 +368,121 @@ export default function App() {
     );
   }
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#7A00C7" />
+  // Cabeçalho Roxo compartilhado Oficial
+  const renderPurpleHeader = (showGreeting) => (
+    <View style={[styles.header, !showGreeting && styles.headerCompact]}>
+      <View style={styles.headerTop}>
+        <TouchableOpacity
+          style={styles.avatarButton}
+          activeOpacity={0.75}
+          onPress={() => setProfileModalVisible(true)}
+        >
+          <Ionicons name="person-outline" size={20} color="#FFFFFF" />
+          <View style={styles.avatarNotificationBadge} />
+        </TouchableOpacity>
 
-      {/* HEADER NUBANK 2026 - DEEP PURPLE EXACT MATCH */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <TouchableOpacity style={styles.avatarButton} activeOpacity={0.8}>
-            <Ionicons name="person-outline" size={20} color="#FFFFFF" />
-            <View style={styles.avatarNotificationBadge} />
+        <View style={styles.headerRightIcons}>
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={() => setBalanceVisible(!balanceVisible)}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={balanceVisible ? 'eye-outline' : 'eye-off-outline'}
+              size={23}
+              color="#FFFFFF"
+            />
           </TouchableOpacity>
 
-          <View style={styles.headerRightIcons}>
-            <TouchableOpacity 
-              style={styles.headerIconBtn} 
-              onPress={() => setBalanceVisible(!balanceVisible)}
-              activeOpacity={0.7}
-            >
-              <Ionicons 
-                name={balanceVisible ? "eye-outline" : "eye-off-outline"} 
-                size={23} 
-                color="#FFFFFF" 
-              />
-            </TouchableOpacity>
+          <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
+            <Ionicons name="help-circle-outline" size={23} color="#FFFFFF" />
+          </TouchableOpacity>
 
-            <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
-              <Ionicons name="help-circle-outline" size={23} color="#FFFFFF" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
-              <MaterialCommunityIcons name="email-newsletter" size={22} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity style={styles.headerIconBtn} activeOpacity={0.7}>
+            <MaterialCommunityIcons name="email-newsletter" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
         </View>
-
-        <Text style={styles.greetingText}>Olá, Victor</Text>
       </View>
 
-      {/* SCROLLABLE FEED - DARK PURE OLED BACKGROUND #000000 */}
-      <ScrollView 
-        style={styles.feedContainer}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 110 }}
-      >
+      {showGreeting && <Text style={styles.greetingText}>Olá, Victor</Text>}
+    </View>
+  );
+
+  // ABA 1: FEED PRINCIPAL NUBANK 2026 DARK
+  const renderHomeFeed = () => (
+    <>
+      {renderPurpleHeader(true)}
+      <View style={styles.feedSheetDark}>
         {/* SALDO EM CONTA */}
-        <TouchableOpacity 
-          style={styles.accountSection} 
-          activeOpacity={0.8}
-          onPress={() => setTransferScreenVisible(true)}
+        <TouchableOpacity
+          style={styles.accountSection}
+          activeOpacity={0.75}
+          onPress={() => setAccountModalVisible(true)}
         >
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Saldo em conta</Text>
-            <Feather name="chevron-right" size={20} color="#6E6E73" />
+            <Feather name="chevron-right" size={20} color={NU.muted} />
           </View>
-          <Text style={styles.balanceAmount}>
-            {balanceVisible ? 'R$ 3.570,28' : '••••••••'}
-          </Text>
+          <MaskedValue
+            visible={balanceVisible}
+            text={formatBRL(balance)}
+            style={styles.balanceAmount}
+            dotSize={8}
+          />
         </TouchableOpacity>
 
-        {/* RECENT PIX CONTACT AVATARS */}
+        {/* AVATARS DE CONTATOS FREQUENTES PIX (EXATO SCREENSHOT) */}
         <View style={styles.recentContactsRow}>
-          <TouchableOpacity style={styles.contactAvatarCircle} activeOpacity={0.8}>
+          <TouchableOpacity 
+            style={styles.contactAvatarCircle} 
+            activeOpacity={0.8}
+            onPress={() => {
+              setPixRecipient('MATHEUS BARROS');
+              setPixInputAmount('0,02');
+              setScheduleModalVisible(true);
+            }}
+          >
             <View style={styles.contactAvatarInner}>
-              <Ionicons name="swap-horizontal" size={16} color="#00C49F" />
+              <Ionicons name="swap-horizontal" size={16} color={NU.green} />
             </View>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.contactAvatarCircle} activeOpacity={0.8}>
+          <TouchableOpacity 
+            style={styles.contactAvatarCircle} 
+            activeOpacity={0.8}
+            onPress={() => {
+              setPixRecipient('Lucas Mendes');
+              setPixInputAmount('50,00');
+              setScheduleModalVisible(true);
+            }}
+          >
             <View style={styles.contactAvatarInner}>
-              <Ionicons name="swap-horizontal" size={16} color="#00C49F" />
+              <Ionicons name="swap-horizontal" size={16} color={NU.green} />
             </View>
           </TouchableOpacity>
         </View>
 
         {/* CARROSSEL DE AÇÕES CIRCULARES */}
-        <ScrollView 
-          horizontal 
+        <ScrollView
+          horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.actionsCarousel}
         >
           {quickActions.map((item) => (
-            <TouchableOpacity 
-              key={item.id} 
-              style={styles.actionItem} 
-              onPress={item.action}
+            <TouchableOpacity
+              key={item.id}
+              style={styles.actionItem}
               activeOpacity={0.75}
+              onPress={item.action}
             >
               <View style={styles.actionCircleContainer}>
                 <View style={styles.actionCircle}>
-                  {item.type === 'ion' && (
+                  {item.customPix ? (
+                    <PixGlyph size={24} color="#FFFFFF" />
+                  ) : item.lib === 'ion' ? (
                     <Ionicons name={item.icon} size={25} color="#FFFFFF" />
-                  )}
-                  {item.type === 'mci' && (
+                  ) : item.lib === 'feather' ? (
+                    <Feather name={item.icon} size={22} color="#FFFFFF" />
+                  ) : (
                     <MaterialCommunityIcons name={item.icon} size={25} color="#FFFFFF" />
                   )}
                 </View>
@@ -271,29 +498,32 @@ export default function App() {
         </ScrollView>
 
         {/* BOTÃO MEUS CARTÕES */}
-        <TouchableOpacity 
-          style={styles.myCardsButton} 
-          onPress={() => setCardsModalVisible(true)}
+        <TouchableOpacity
+          style={styles.myCardsButton}
           activeOpacity={0.8}
+          onPress={() => setCardsModalVisible(true)}
         >
           <Ionicons name="phone-portrait-outline" size={20} color="#FFFFFF" />
           <Text style={styles.myCardsText}>Meus cartões</Text>
         </TouchableOpacity>
 
         {/* CARROSSEL INFORMATIVO DO FEED (PIX NO CRÉDITO, ETC) */}
-        <ScrollView 
-          horizontal 
+        <ScrollView
+          horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.promoCarousel}
         >
-          {promoCards.map((promo) => (
-            <TouchableOpacity 
-              key={promo.id} 
+          {noticeCards.map((promo) => (
+            <TouchableOpacity
+              key={promo.id}
               style={[
-                styles.promoCard, 
-                promo.highlight ? styles.promoCardHighlight : styles.promoCardNormal
+                styles.promoCard,
+                promo.highlight ? styles.promoCardHighlight : styles.promoCardNormal,
               ]}
               activeOpacity={0.85}
+              onPress={() => {
+                if (promo.highlight) setCreditModalVisible(true);
+              }}
             >
               <View style={styles.promoTextContainer}>
                 <Text style={styles.promoBodyText}>
@@ -311,7 +541,6 @@ export default function App() {
           ))}
         </ScrollView>
 
-        {/* DIVIDER ENTRE SEÇÕES */}
         <View style={styles.sectionDivider} />
 
         {/* PRÓXIMOS 7 DIAS */}
@@ -319,7 +548,7 @@ export default function App() {
           <View style={styles.sectionHeaderRow}>
             <View style={styles.rowAlign}>
               <Text style={styles.sectionTitle}>Próximos 7 dias</Text>
-              <Feather name="chevron-right" size={18} color="#6E6E73" style={{ marginLeft: 6 }} />
+              <Feather name="chevron-right" size={18} color={NU.muted} style={{ marginLeft: 6 }} />
             </View>
             <View style={styles.circleIconSmall}>
               <Ionicons name="notifications-outline" size={16} color="#FFFFFF" />
@@ -333,17 +562,24 @@ export default function App() {
         <View style={styles.sectionDivider} />
 
         {/* CARTÃO DE CRÉDITO */}
-        <TouchableOpacity style={styles.cardSection} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.cardSection}
+          activeOpacity={0.85}
+          onPress={() => setCreditModalVisible(true)}
+        >
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Cartão de crédito</Text>
-            <Feather name="chevron-right" size={20} color="#6E6E73" />
+            <Feather name="chevron-right" size={20} color={NU.muted} />
           </View>
           <Text style={styles.subText}>Fatura atual</Text>
-          <Text style={styles.invoiceValue}>
-            {balanceVisible ? 'R$ 16,44' : '••••••••'}
-          </Text>
+          <MaskedValue
+            visible={balanceVisible}
+            text={formatBRL(invoiceTotal)}
+            style={styles.invoiceValue}
+            dotSize={8}
+          />
           <Text style={styles.limitInfo}>
-            Limite disponível de {balanceVisible ? 'R$ 983,56' : '••••••••'}
+            Limite disponível de {balanceVisible ? formatBRL(availableLimit) : '••••'}
           </Text>
         </TouchableOpacity>
 
@@ -353,12 +589,15 @@ export default function App() {
         <TouchableOpacity style={styles.cardSection} activeOpacity={0.85}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Empréstimo</Text>
-            <Feather name="chevron-right" size={20} color="#6E6E73" />
+            <Feather name="chevron-right" size={20} color={NU.muted} />
           </View>
           <Text style={styles.subText}>Valor disponível de até</Text>
-          <Text style={styles.loanAmount}>
-            {balanceVisible ? 'R$ 50.000,00' : '••••••••'}
-          </Text>
+          <MaskedValue
+            visible={balanceVisible}
+            text="R$ 50.000,00"
+            style={styles.loanAmount}
+            dotSize={8}
+          />
         </TouchableOpacity>
 
         <View style={styles.sectionDivider} />
@@ -376,117 +615,213 @@ export default function App() {
             </View>
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </View>
+    </>
+  );
 
-      {/* FLOATING PILL BOTTOM NAVIGATION (EXACT 2026 FLOATING CAPSULE) */}
-      <View style={styles.floatingNavContainer}>
-        <View style={styles.floatingNavCapsule}>
-          <TouchableOpacity 
-            style={[styles.floatingTabItem, activeTab === 'home' && styles.floatingTabItemActive]} 
-            onPress={() => setActiveTab('home')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="swap-vertical" size={20} color="#FFFFFF" />
+  // ABA 2: PLANEJAMENTO ($ — Caixinhas, Investimentos, Cripto)
+  const renderPlanningTab = () => (
+    <>
+      {renderPurpleHeader(false)}
+      <View style={styles.feedSheetDark}>
+        <View style={styles.cardSection}>
+          <Text style={styles.tabHeroTitle}>Acompanhe seu dinheiro</Text>
+
+          <TouchableOpacity style={styles.planningRowCard} activeOpacity={0.75}>
+            <View style={styles.planningRowLeft}>
+              <View style={styles.planningIconBox}>
+                <MaterialCommunityIcons name="piggy-bank-outline" size={22} color="#FFFFFF" />
+              </View>
+              <View>
+                <Text style={styles.planningItemTitle}>Caixinhas</Text>
+                <Text style={styles.planningItemSub}>3 objetivos ativos • 115% CDI</Text>
+              </View>
+            </View>
+            <MaskedValue
+              visible={balanceVisible}
+              text="R$ 12.450,00"
+              style={styles.planningValue}
+              dotSize={6}
+            />
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.floatingTabItem, activeTab === 'money' && styles.floatingTabItemActive]} 
-            onPress={() => setActiveTab('money')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="logo-usd" size={19} color="#8E8E93" />
+          <TouchableOpacity style={styles.planningRowCard} activeOpacity={0.75}>
+            <View style={styles.planningRowLeft}>
+              <View style={styles.planningIconBox}>
+                <Feather name="trending-up" size={20} color="#FFFFFF" />
+              </View>
+              <View>
+                <Text style={styles.planningItemTitle}>Investimentos</Text>
+                <Text style={styles.planningItemSub}>CDBs, Tesouro e Ações</Text>
+              </View>
+            </View>
+            <MaskedValue
+              visible={balanceVisible}
+              text="R$ 5.870,00"
+              style={styles.planningValue}
+              dotSize={6}
+            />
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.floatingTabItem, activeTab === 'shopping' && styles.floatingTabItemActive]} 
-            onPress={() => setActiveTab('shopping')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="bag-handle-outline" size={19} color="#8E8E93" />
+          <TouchableOpacity style={styles.planningRowCard} activeOpacity={0.75}>
+            <View style={styles.planningRowLeft}>
+              <View style={styles.planningIconBox}>
+                <MaterialCommunityIcons name="bitcoin" size={22} color="#FFFFFF" />
+              </View>
+              <View>
+                <Text style={styles.planningItemTitle}>Cripto</Text>
+                <Text style={styles.planningItemSub}>BTC, ETH, SOL e USDC</Text>
+              </View>
+            </View>
+            <MaskedValue
+              visible={balanceVisible}
+              text="R$ 1.240,50"
+              style={styles.planningValue}
+              dotSize={6}
+            />
           </TouchableOpacity>
         </View>
-      </View>
 
-      {/* MODAL ÁREA PIX */}
-      <Modal 
-        animationType="slide" 
-        transparent={true} 
-        visible={pixModalVisible} 
-        onRequestClose={() => setPixModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity 
-                style={styles.modalCloseBtn} 
-                onPress={() => setPixModalVisible(false)}
-              >
-                <Feather name="x" size={24} color="#FFFFFF" />
+        <View style={styles.sectionDivider} />
+
+        {/* SUAS CAIXINHAS */}
+        <View style={styles.cardSection}>
+          <Text style={[styles.sectionTitle, { marginBottom: 14 }]}>Suas Caixinhas</Text>
+          <View style={styles.caixinhasGrid}>
+            {[
+              { name: 'Reserva de\nEmergência', val: 'R$ 8.200,00', rate: '+R$ 84,20 este mês', bg: '#261738' },
+              { name: 'Upgrade\nPC / Setup', val: 'R$ 2.750,00', rate: '+R$ 26,10 este mês', bg: '#162238' },
+              { name: 'Viagem\n2027', val: 'R$ 1.500,00', rate: '+R$ 14,90 este mês', bg: '#10393B' },
+            ].map((cx, i) => (
+              <TouchableOpacity key={i} style={styles.caixinhaCard} activeOpacity={0.8}>
+                <View style={[styles.caixinhaBanner, { backgroundColor: cx.bg }]}>
+                  <MaterialCommunityIcons name="piggy-bank-outline" size={26} color="#FFFFFF" />
+                </View>
+                <Text style={styles.caixinhaName}>{cx.name}</Text>
+                <MaskedValue
+                  visible={balanceVisible}
+                  text={cx.val}
+                  style={styles.caixinhaVal}
+                  dotSize={6}
+                />
+                <Text style={styles.caixinhaYield}>{cx.rate}</Text>
               </TouchableOpacity>
-              <Text style={styles.modalHeading}>Área Pix</Text>
-              <View style={{ width: 24 }} />
+            ))}
+          </View>
+        </View>
+      </View>
+    </>
+  );
+
+  // ABA 3: SHOPPING DO NU
+  const renderShoppingTab = () => (
+    <>
+      {renderPurpleHeader(false)}
+      <View style={styles.feedSheetDark}>
+        <View style={styles.cardSection}>
+          <Text style={styles.tabHeroTitle}>Shopping</Text>
+
+          <View style={styles.searchBoxDark}>
+            <Feather name="search" size={18} color={NU.muted} />
+            <Text style={styles.searchPlaceholderDark}>Buscar no Shopping do Nu</Text>
+          </View>
+
+          <View style={styles.shopBannerDark}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.shopBannerTag}>CASHBACK DIRETO NA CONTA</Text>
+              <Text style={styles.shopBannerTitle}>Até 15% de volta nas maiores lojas</Text>
+              <Text style={styles.shopBannerSub}>Use seu cartão Nu ou Pix no checkout.</Text>
             </View>
+            <MaterialCommunityIcons name="ticket-percent-outline" size={44} color="#FFFFFF" />
+          </View>
 
-            <Text style={styles.modalNotice}>
-              Envie e receba transferências em tempo real, sem taxas.
-            </Text>
+          <Text style={[styles.sectionTitle, { marginTop: 24, marginBottom: 14 }]}>
+            Lojas em destaque
+          </Text>
 
-            <TouchableOpacity 
-              style={styles.modalActionItem} 
-              onPress={() => {
-                setPixModalVisible(false);
-                setTransferScreenVisible(true);
-              }}
-              activeOpacity={0.7}
+          <View style={styles.storesGrid}>
+            {[
+              { name: 'Amazon', cashback: '2% cashback', color: '#232F3E' },
+              { name: 'Mercado Livre', cashback: '3% cashback', color: '#D4A017' },
+              { name: 'Shopee', cashback: '4% cashback', color: '#EE4D2D' },
+              { name: 'KaBuM!', cashback: '5% cashback', color: '#FF6500' },
+              { name: 'Nike', cashback: '6% cashback', color: '#111111' },
+              { name: 'iFood Card', cashback: '5% OFF', color: '#EA1D2C' },
+            ].map((store, i) => (
+              <TouchableOpacity key={i} style={styles.storeCardDark} activeOpacity={0.75}>
+                <View style={[styles.storeLogoBadge, { backgroundColor: store.color }]}>
+                  <Text style={styles.storeLogoLetter}>{store.name[0]}</Text>
+                </View>
+                <Text style={styles.storeNameDark}>{store.name}</Text>
+                <View style={styles.cashbackPill}>
+                  <Text style={styles.cashbackPillText}>{store.cashback}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
+    </>
+  );
+
+  return (
+    <View style={styles.root}>
+      <StatusBar barStyle="light-content" backgroundColor="#7A00C7" />
+
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {activeTab === 'home' && renderHomeFeed()}
+          {activeTab === 'planning' && renderPlanningTab()}
+          {activeTab === 'shopping' && renderShoppingTab()}
+        </ScrollView>
+
+        {/* CÁPSULA FLUTUANTE INFERIOR OFICIAL 2026 (EXATA DO SCREENSHOT) */}
+        <View style={styles.floatingNavContainer} pointerEvents="box-none">
+          <View style={styles.floatingNavCapsule}>
+            <TouchableOpacity
+              style={[styles.floatingTabItem, activeTab === 'home' && styles.floatingTabItemActive]}
+              onPress={() => setActiveTab('home')}
+              activeOpacity={0.8}
             >
-              <View style={styles.modalActionIcon}>
-                <Feather name="arrow-up-right" size={22} color="#820AD1" />
-              </View>
-              <View style={styles.modalActionTexts}>
-                <Text style={styles.modalActionTitle}>Transferir</Text>
-                <Text style={styles.modalActionSub}>Pague com chave Pix, QR Code ou agência/conta</Text>
-              </View>
-              <Feather name="chevron-right" size={20} color="#555555" />
+              <Ionicons name="swap-vertical" size={20} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.modalActionItem} activeOpacity={0.7}>
-              <View style={styles.modalActionIcon}>
-                <Ionicons name="copy-outline" size={22} color="#820AD1" />
-              </View>
-              <View style={styles.modalActionTexts}>
-                <Text style={styles.modalActionTitle}>Pix Copia e Cola</Text>
-                <Text style={styles.modalActionSub}>Cole o código para pagar</Text>
-              </View>
-              <Feather name="chevron-right" size={20} color="#555555" />
+            <TouchableOpacity
+              style={[styles.floatingTabItem, activeTab === 'planning' && styles.floatingTabItemActive]}
+              onPress={() => setActiveTab('planning')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="logo-usd" size={19} color={activeTab === 'planning' ? '#FFFFFF' : '#8E8E93'} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.modalActionItem} activeOpacity={0.7}>
-              <View style={styles.modalActionIcon}>
-                <Ionicons name="qr-code-outline" size={22} color="#820AD1" />
-              </View>
-              <View style={styles.modalActionTexts}>
-                <Text style={styles.modalActionTitle}>Ler QR Code</Text>
-                <Text style={styles.modalActionSub}>Aponte a câmera para pagar</Text>
-              </View>
-              <Feather name="chevron-right" size={20} color="#555555" />
+            <TouchableOpacity
+              style={[styles.floatingTabItem, activeTab === 'shopping' && styles.floatingTabItemActive]}
+              onPress={() => setActiveTab('shopping')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="bag-handle-outline" size={19} color={activeTab === 'shopping' ? '#FFFFFF' : '#8E8E93'} />
             </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      </SafeAreaView>
 
-      {/* TELA DE TRANSFERÊNCIA/AGENDAMENTO (EXATA DO SCREENSHOT MATHEUS BARROS) */}
+      {/* ==================== TELA COMPLETA DE AGENDAMENTO (EXATA DO SCREENSHOT MATHEUS BARROS) ==================== */}
       <Modal
         animationType="slide"
-        visible={transferScreenVisible}
-        onRequestClose={() => setTransferScreenVisible(false)}
+        visible={scheduleModalVisible}
+        onRequestClose={() => setScheduleModalVisible(false)}
       >
         <SafeAreaView style={styles.transferScreenContainer}>
           <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-          
+
           <View style={styles.transferScreenHeader}>
-            <TouchableOpacity 
-              style={styles.transferBackBtn} 
-              onPress={() => setTransferScreenVisible(false)}
+            <TouchableOpacity
+              style={styles.transferBackBtn}
+              onPress={() => setScheduleModalVisible(false)}
             >
               <Feather name="chevron-left" size={28} color="#111111" />
             </TouchableOpacity>
@@ -496,13 +831,15 @@ export default function App() {
             <Text style={styles.transferTitleHeader}>Agendando</Text>
 
             <View style={styles.transferAmountRow}>
-              <Text style={styles.transferAmountPurple}>R$ 0,02</Text>
+              <Text style={styles.transferAmountPurple}>R$ {pixInputAmount}</Text>
               <TouchableOpacity style={styles.pencilBtn}>
                 <Ionicons name="pencil-outline" size={20} color="#820AD1" />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.transferTargetLabel}>para <Text style={styles.boldTargetText}>MATHEUS BARROS</Text></Text>
+            <Text style={styles.transferTargetLabel}>
+              para <Text style={styles.boldTargetText}>{pixRecipient}</Text>
+            </Text>
 
             <TouchableOpacity style={styles.writeMessageRow} activeOpacity={0.7}>
               <Ionicons name="chatbubble-outline" size={18} color="#820AD1" />
@@ -527,30 +864,34 @@ export default function App() {
 
             <View style={styles.fieldDetailRow}>
               <Text style={styles.fieldLabelMuted}>CPF</Text>
+              <Text style={styles.fieldValueSmall}>***.482.918-**</Text>
             </View>
 
             <View style={styles.fieldDetailRow}>
               <Text style={styles.fieldLabelMuted}>Instituição</Text>
+              <Text style={styles.fieldValueSmall}>Nu Pagamentos S.A.</Text>
             </View>
 
             <View style={styles.fieldDetailRow}>
               <Text style={styles.fieldLabelMuted}>Agência</Text>
+              <Text style={styles.fieldValueSmall}>0001</Text>
             </View>
 
             <View style={styles.fieldDetailRow}>
               <Text style={styles.fieldLabelMuted}>Conta corrente</Text>
+              <Text style={styles.fieldValueSmall}>8492019-3</Text>
             </View>
           </ScrollView>
 
-          {/* BOTÃO FIXO INFERIOR AGENDAR TRANSFERÊNCIA */}
           <View style={styles.transferBottomContainer}>
-            <TouchableOpacity 
-              style={styles.confirmTransferBtn} 
-              onPress={() => {
-                Alert.alert("Sucesso", "Transferência agendada com sucesso!");
-                setTransferScreenVisible(false);
-              }}
+            <TouchableOpacity
+              style={styles.confirmTransferBtn}
               activeOpacity={0.8}
+              onPress={() => {
+                handleConfirmPix(pixRecipient);
+                setScheduleModalVisible(false);
+                Alert.alert('Transferência Agendada', `Agendamento de R$ ${pixInputAmount} para ${pixRecipient} realizado com sucesso!`);
+              }}
             >
               <Text style={styles.confirmTransferBtnText}>Agendar transferência</Text>
             </TouchableOpacity>
@@ -558,61 +899,613 @@ export default function App() {
         </SafeAreaView>
       </Modal>
 
-      {/* MODAL MEUS CARTÕES */}
-      <Modal 
-        animationType="slide" 
-        transparent={true} 
-        visible={cardsModalVisible} 
-        onRequestClose={() => setCardsModalVisible(false)}
+      {/* ==================== MODAL ÁREA PIX COMPLETA ==================== */}
+      <Modal
+        animationType="slide"
+        visible={pixModalVisible}
+        onRequestClose={() => setPixModalVisible(false)}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity 
-                style={styles.modalCloseBtn} 
-                onPress={() => setCardsModalVisible(false)}
-              >
-                <Feather name="x" size={24} color="#FFFFFF" />
+        <SafeAreaView style={styles.fullModalSafeDark}>
+          <View style={styles.fullModalTopBar}>
+            <TouchableOpacity
+              style={styles.topIconHit}
+              onPress={() => {
+                if (pixStep === 'menu' || pixStep === 'receipt') {
+                  setPixModalVisible(false);
+                } else if (pixStep === 'recipient') {
+                  setPixStep('amount');
+                } else {
+                  setPixStep('menu');
+                }
+              }}
+            >
+              <Feather
+                name={pixStep === 'menu' || pixStep === 'receipt' ? 'x' : 'chevron-left'}
+                size={26}
+                color="#FFFFFF"
+              />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.topIconHit}>
+              <Ionicons name="help-circle-outline" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+
+          {pixStep === 'menu' && (
+            <ScrollView contentContainerStyle={styles.fullModalPad}>
+              <Text style={styles.nuBigTitleDark}>Área Pix</Text>
+              <Text style={styles.nuBigSubtitleDark}>
+                Envie e receba transferências 24h por dia, 7 dias por semana sem nenhuma tarifa.
+              </Text>
+
+              <View style={styles.pixGrid}>
+                {[
+                  { label: 'Transferir', icon: 'arrow-up-right', lib: 'feather', onPress: () => setPixStep('amount') },
+                  { label: 'Programar', icon: 'calendar-outline', lib: 'ion', onPress: () => setScheduleModalVisible(true) },
+                  { label: 'Ler QR code', icon: 'qr-code-outline', lib: 'ion', onPress: () => {} },
+                  { label: 'Pix Copia\ne Cola', icon: 'copy-outline', lib: 'ion', onPress: () => {} },
+                  { label: 'Cobrar', icon: 'chatbubble-ellipses-outline', lib: 'ion', onPress: () => {} },
+                  { label: 'Depositar', icon: 'arrow-down-left', lib: 'feather', onPress: () => {} },
+                ].map((opt, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={styles.pixGridItem}
+                    activeOpacity={0.7}
+                    onPress={opt.onPress}
+                  >
+                    <View style={styles.pixGridCircleDark}>
+                      {opt.lib === 'feather' ? (
+                        <Feather name={opt.icon} size={23} color="#FFFFFF" />
+                      ) : (
+                        <Ionicons name={opt.icon} size={23} color="#FFFFFF" />
+                      )}
+                    </View>
+                    <Text style={styles.pixGridLabelDark}>{opt.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={[styles.sectionDivider, { marginHorizontal: -24, marginVertical: 20 }]} />
+
+              <Text style={styles.prefHeaderDark}>Preferências</Text>
+
+              <TouchableOpacity style={styles.prefRowDark} activeOpacity={0.7}>
+                <Ionicons name="key-outline" size={22} color="#FFFFFF" />
+                <Text style={styles.prefRowTextDark}>Registrar ou trazer chaves</Text>
+                <Feather name="chevron-right" size={20} color={NU.muted} />
               </TouchableOpacity>
-              <Text style={styles.modalHeading}>Meus cartões</Text>
-              <View style={{ width: 24 }} />
+
+              <TouchableOpacity style={styles.prefRowDark} activeOpacity={0.7}>
+                <Feather name="sliders" size={20} color="#FFFFFF" />
+                <Text style={styles.prefRowTextDark}>Configurar limites Pix</Text>
+                <Feather name="chevron-right" size={20} color={NU.muted} />
+              </TouchableOpacity>
+            </ScrollView>
+          )}
+
+          {pixStep === 'amount' && (
+            <View style={styles.pixFlowWrap}>
+              <View>
+                <Text style={styles.nuBigTitleDark}>Qual é o valor da transferência?</Text>
+                <Text style={styles.nuBigSubtitleDark}>
+                  Saldo disponível em conta{' '}
+                  <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{formatBRL(balance)}</Text>
+                </Text>
+
+                <View style={styles.currencyInputRowDark}>
+                  <Text style={styles.currencyPrefixDark}>R$</Text>
+                  <TextInput
+                    style={styles.currencyInputDark}
+                    value={pixInputAmount}
+                    onChangeText={setPixInputAmount}
+                    placeholder="0,00"
+                    placeholderTextColor="#555555"
+                    keyboardType="decimal-pad"
+                    autoFocus
+                  />
+                </View>
+
+                <View style={styles.quickAmountsRow}>
+                  {['0,02', '50', '100', '250'].map((val) => (
+                    <TouchableOpacity
+                      key={val}
+                      style={styles.quickAmountChipDark}
+                      onPress={() => setPixInputAmount(val)}
+                    >
+                      <Text style={styles.quickAmountTextDark}>+ R$ {val}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.fabNextBtn,
+                  (!pixInputAmount || parseFloat(pixInputAmount.replace(',', '.')) <= 0) &&
+                    styles.fabNextBtnDisabled,
+                ]}
+                disabled={!pixInputAmount || parseFloat(pixInputAmount.replace(',', '.')) <= 0}
+                onPress={() => setPixStep('recipient')}
+              >
+                <Feather name="arrow-right" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {pixStep === 'recipient' && (
+            <ScrollView contentContainerStyle={styles.fullModalPad}>
+              <Text style={styles.nuBigTitleDark}>
+                Para quem você quer transferir R$ {pixInputAmount}?
+              </Text>
+              <Text style={styles.nuBigSubtitleDark}>
+                Digite uma chave Pix ou selecione alguém nos contatos.
+              </Text>
+
+              <TextInput
+                style={styles.underlineInputDark}
+                value={pixRecipient}
+                onChangeText={setPixRecipient}
+                placeholder="Nome, CPF ou chave Pix"
+                placeholderTextColor="#777777"
+              />
+
+              {pixRecipient.trim().length > 0 && (
+                <TouchableOpacity
+                  style={styles.confirmPixBtn}
+                  onPress={() => handleConfirmPix(pixRecipient)}
+                >
+                  <Text style={styles.confirmPixBtnText}>Transferir para "{pixRecipient}"</Text>
+                </TouchableOpacity>
+              )}
+
+              <Text style={[styles.prefHeaderDark, { marginTop: 28 }]}>Contatos frequentes</Text>
+              {pixContacts.map((contact) => (
+                <TouchableOpacity
+                  key={contact.id}
+                  style={styles.contactRowDark}
+                  activeOpacity={0.7}
+                  onPress={() => handleConfirmPix(contact.name)}
+                >
+                  <View style={styles.contactAvatarCircle}>
+                    <Text style={styles.contactInitialsText}>{contact.initials}</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.contactNameDark}>{contact.name}</Text>
+                    <Text style={styles.contactBankDark}>{contact.bank}</Text>
+                  </View>
+                  <Feather name="chevron-right" size={20} color={NU.muted} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+
+          {pixStep === 'receipt' && lastReceipt && (
+            <ScrollView contentContainerStyle={styles.fullModalPad}>
+              <View style={styles.receiptBadge}>
+                <Ionicons name="checkmark-circle" size={48} color={NU.green} />
+              </View>
+              <Text style={styles.nuBigTitleDark}>Transferência realizada</Text>
+              <Text style={styles.nuBigSubtitleDark}>{lastReceipt.date}</Text>
+
+              <View style={styles.receiptBoxDark}>
+                <View style={styles.receiptRowDark}>
+                  <Text style={styles.receiptLabelDark}>Valor</Text>
+                  <Text style={styles.receiptValBoldDark}>{formatBRL(lastReceipt.amount)}</Text>
+                </View>
+                <View style={styles.receiptRowDark}>
+                  <Text style={styles.receiptLabelDark}>Destino</Text>
+                  <Text style={styles.receiptValDark}>{lastReceipt.recipient}</Text>
+                </View>
+                <View style={styles.receiptRowDark}>
+                  <Text style={styles.receiptLabelDark}>Tipo</Text>
+                  <Text style={styles.receiptValDark}>Pix</Text>
+                </View>
+                <View style={styles.receiptRowDark}>
+                  <Text style={styles.receiptLabelDark}>ID da transação</Text>
+                  <Text style={styles.receiptIdDark}>{lastReceipt.id}</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.confirmPixBtn}
+                onPress={() => {
+                  setPixStep('menu');
+                  setPixModalVisible(false);
+                }}
+              >
+                <Text style={styles.confirmPixBtnText}>Voltar para o início</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* ==================== MODAL CONTA / EXTRATO ==================== */}
+      <Modal
+        animationType="slide"
+        visible={accountModalVisible}
+        onRequestClose={() => setAccountModalVisible(false)}
+      >
+        <SafeAreaView style={styles.fullModalSafeDark}>
+          <View style={styles.fullModalTopBar}>
+            <TouchableOpacity style={styles.topIconHit} onPress={() => setAccountModalVisible(false)}>
+              <Feather name="chevron-left" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.topIconHit}>
+              <Ionicons name="help-circle-outline" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={{ paddingHorizontal: 24, paddingTop: 8 }}>
+              <Text style={styles.subText}>Saldo disponível</Text>
+              <MaskedValue
+                visible={balanceVisible}
+                text={formatBRL(balance)}
+                style={styles.accountBigBalanceDark}
+                dotSize={10}
+              />
+
+              <TouchableOpacity style={styles.accountDetailRowDark} activeOpacity={0.7}>
+                <View style={styles.assistantLeft}>
+                  <MaterialCommunityIcons name="piggy-bank-outline" size={22} color="#FFFFFF" />
+                  <View style={{ marginLeft: 14 }}>
+                    <Text style={styles.detailRowSubDark}>Dinheiro guardado nas Caixinhas</Text>
+                    <Text style={styles.detailRowValDark}>
+                      {balanceVisible ? 'R$ 12.450,00' : '••••'}
+                    </Text>
+                  </View>
+                </View>
+                <Feather name="chevron-right" size={20} color={NU.muted} />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.accountDetailRowDark} activeOpacity={0.7}>
+                <View style={styles.assistantLeft}>
+                  <Feather name="trending-up" size={20} color={NU.green} />
+                  <View style={{ marginLeft: 14 }}>
+                    <Text style={styles.detailRowSubDark}>Rendimento total da conta</Text>
+                    <Text style={[styles.detailRowValDark, { color: NU.green }]}>
+                      +R$ 142,87 este mês
+                    </Text>
+                  </View>
+                </View>
+                <Feather name="chevron-right" size={20} color={NU.muted} />
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.cardRowItem}>
-              <View style={styles.cardGraphicPurple}>
-                <MaterialCommunityIcons name="integrated-circuit-chip" size={18} color="#D19800" />
-                <Text style={styles.cardBrandMini}>nu</Text>
-              </View>
-              <View style={styles.cardInfoCol}>
-                <Text style={styles.cardRowTitle}>Cartão virtual</Text>
-                <Text style={styles.cardRowNumber}>•••• 8842</Text>
-              </View>
-              <Ionicons name="shield-checkmark" size={20} color="#00C49F" />
-            </View>
+            <View style={[styles.sectionDivider, { marginVertical: 16 }]} />
 
-            <View style={styles.cardRowItem}>
-              <View style={styles.cardGraphicDark}>
-                <MaterialCommunityIcons name="integrated-circuit-chip" size={18} color="#D19800" />
-                <Text style={styles.cardBrandMiniDark}>nu</Text>
+            <View style={{ paddingHorizontal: 24, paddingBottom: 40 }}>
+              <Text style={[styles.sectionTitle, { marginBottom: 14 }]}>Histórico</Text>
+
+              <View style={[styles.searchBoxDark, { marginBottom: 16 }]}>
+                <Feather name="search" size={18} color={NU.muted} />
+                <TextInput
+                  style={styles.searchInputDark}
+                  value={extractSearch}
+                  onChangeText={setExtractSearch}
+                  placeholder="Buscar movimentação"
+                  placeholderTextColor={NU.muted}
+                />
               </View>
-              <View style={styles.cardInfoCol}>
-                <Text style={styles.cardRowTitle}>Cartão físico</Text>
-                <Text style={styles.cardRowNumber}>•••• 4109</Text>
-              </View>
-              <Ionicons name="lock-closed-outline" size={20} color="#757575" />
+
+              {filteredTransactions.map((tx) => {
+                const isPositive = tx.amount > 0;
+                return (
+                  <View key={tx.id} style={styles.txRowDark}>
+                    <View
+                      style={[
+                        styles.txIconCircleDark,
+                        isPositive && { backgroundColor: NU.greenSoft },
+                      ]}
+                    >
+                      <Feather
+                        name={isPositive ? 'arrow-down-left' : 'arrow-up-right'}
+                        size={19}
+                        color={isPositive ? NU.green : '#FFFFFF'}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.txTopLine}>
+                        <Text style={styles.txTitleDark}>{tx.title}</Text>
+                        <Text style={styles.txDateDark}>{tx.date}</Text>
+                      </View>
+                      <Text style={styles.txSubDark}>{tx.subtitle}</Text>
+                      <Text
+                        style={[
+                          styles.txAmountDark,
+                          isPositive && { color: NU.green },
+                        ]}
+                      >
+                        {balanceVisible ? formatBRL(tx.amount) : '••••'}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* ==================== MODAL CARTÃO DE CRÉDITO ==================== */}
+      <Modal
+        animationType="slide"
+        visible={creditModalVisible}
+        onRequestClose={() => setCreditModalVisible(false)}
+      >
+        <SafeAreaView style={styles.fullModalSafeDark}>
+          <View style={styles.fullModalTopBar}>
+            <TouchableOpacity style={styles.topIconHit} onPress={() => setCreditModalVisible(false)}>
+              <Feather name="chevron-left" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={{ flexDirection: 'row' }}>
+              <TouchableOpacity style={styles.topIconHit}>
+                <Feather name="search" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.topIconHit}>
+                <Ionicons name="help-circle-outline" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
             </View>
           </View>
-        </View>
+
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={{ paddingHorizontal: 24, paddingTop: 10 }}>
+              <Text style={styles.invoiceStatusTag}>FATURA ATUAL</Text>
+              <MaskedValue
+                visible={balanceVisible}
+                text={formatBRL(invoiceTotal)}
+                style={[styles.accountBigBalanceDark, { color: NU.blue }]}
+                dotSize={10}
+              />
+              <Text style={styles.limitInfo}>
+                Limite disponível {balanceVisible ? formatBRL(availableLimit) : '••••'}
+              </Text>
+              <Text style={[styles.limitInfo, { marginTop: 2 }]}>
+                Fecha em 03 DEZ • Vence em 10 DEZ
+              </Text>
+
+              <View style={styles.limitBarTrackDark}>
+                <View style={[styles.limitBarUsed, { width: `${invoicePercent}%` }]} />
+                <View style={styles.limitBarFreeDark} />
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingVertical: 18 }}
+              >
+                {[
+                  { label: 'Pagar fatura', icon: 'barcode', lib: 'mci' },
+                  { label: 'Resumo\nde faturas', icon: 'document-text-outline', lib: 'ion' },
+                  { label: 'Ajustar\nlimite', icon: 'sliders', lib: 'feather' },
+                  {
+                    label: 'Meus\ncartões',
+                    icon: 'card-outline',
+                    lib: 'ion',
+                    action: () => {
+                      setCreditModalVisible(false);
+                      setCardsModalVisible(true);
+                    },
+                  },
+                ].map((act, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={styles.actionItem}
+                    activeOpacity={0.7}
+                    onPress={act.action}
+                  >
+                    <View style={[styles.actionCircle, { width: 62, height: 62, borderRadius: 31 }]}>
+                      {act.lib === 'mci' && (
+                        <MaterialCommunityIcons name={act.icon} size={22} color="#FFFFFF" />
+                      )}
+                      {act.lib === 'ion' && <Ionicons name={act.icon} size={22} color="#FFFFFF" />}
+                      {act.lib === 'feather' && <Feather name={act.icon} size={20} color="#FFFFFF" />}
+                    </View>
+                    <Text style={styles.actionLabel}>{act.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            <View style={styles.sectionDivider} />
+
+            <View style={{ paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40 }}>
+              <Text style={[styles.sectionTitle, { marginBottom: 14 }]}>Compras recentes</Text>
+              {creditPurchases.map((p) => (
+                <View key={p.id} style={styles.txRowDark}>
+                  <View style={styles.txIconCircleDark}>
+                    <Ionicons name={p.icon} size={20} color="#FFFFFF" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.txTopLine}>
+                      <Text style={styles.txTitleDark}>{p.merchant}</Text>
+                      <Text style={styles.txDateDark}>{p.date}</Text>
+                    </View>
+                    <Text style={styles.txSubDark}>{p.category}</Text>
+                    <Text style={styles.txAmountDark}>
+                      {balanceVisible ? formatBRL(p.amount) : '••••'}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
-    </SafeAreaView>
+
+      {/* ==================== MODAL MEUS CARTÕES ==================== */}
+      <Modal
+        animationType="slide"
+        visible={cardsModalVisible}
+        onRequestClose={() => setCardsModalVisible(false)}
+      >
+        <SafeAreaView style={styles.fullModalSafeDark}>
+          <View style={styles.fullModalTopBar}>
+            <TouchableOpacity style={styles.topIconHit} onPress={() => setCardsModalVisible(false)}>
+              <Feather name="x" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={{ width: 26 }} />
+          </View>
+
+          <ScrollView contentContainerStyle={styles.fullModalPad}>
+            <Text style={styles.nuBigTitleDark}>Meus cartões</Text>
+
+            <Text style={styles.cardsGroupTitleDark}>Cartão físico</Text>
+            {cards
+              .filter((c) => c.type === 'physical')
+              .map((card) => (
+                <View key={card.id} style={styles.cardListItemDark}>
+                  <View style={styles.cardMiniDark}>
+                    <MaterialCommunityIcons name="integrated-circuit-chip" size={16} color="#C9A227" />
+                    <Text style={styles.cardMiniLogoDark}>nu</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 14 }}>
+                    <Text style={styles.cardTitleDark}>
+                      {card.label} {card.blocked ? '(Bloqueado)' : ''}
+                    </Text>
+                    <Text style={styles.cardMaskDark}>•••• {card.last4}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.blockBtnDark, card.blocked && styles.blockBtnActive]}
+                    onPress={() => toggleBlockCard(card.id)}
+                  >
+                    <Ionicons
+                      name={card.blocked ? 'lock-closed' : 'lock-open-outline'}
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                  </TouchableOpacity>
+                </View>
+              ))}
+
+            <Text style={[styles.cardsGroupTitleDark, { marginTop: 24 }]}>Cartões virtuais</Text>
+            {cards
+              .filter((c) => c.type === 'virtual')
+              .map((card) => (
+                <View key={card.id} style={styles.cardListItemDark}>
+                  <View style={styles.cardMiniPurple}>
+                    <MaterialCommunityIcons name="integrated-circuit-chip" size={16} color="#E6C256" />
+                    <Text style={styles.cardMiniLogoLight}>nu</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 14 }}>
+                    <Text style={styles.cardTitleDark}>
+                      {card.name} {card.blocked ? '(Bloqueado)' : ''}
+                    </Text>
+                    <Text style={styles.cardMaskDark}>•••• {card.last4}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.blockBtnDark, card.blocked && styles.blockBtnActive]}
+                    onPress={() => toggleBlockCard(card.id)}
+                  >
+                    <Ionicons
+                      name={card.blocked ? 'lock-closed' : 'lock-open-outline'}
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                  </TouchableOpacity>
+                </View>
+              ))}
+
+            <TouchableOpacity style={styles.createCardBtnDark} activeOpacity={0.75} onPress={createVirtualCard}>
+              <Feather name="plus" size={20} color="#FFFFFF" />
+              <Text style={styles.createCardBtnTextDark}>Criar cartão virtual</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* ==================== MODAL PERFIL / MENU NUBANK ==================== */}
+      <Modal
+        animationType="slide"
+        visible={profileModalVisible}
+        onRequestClose={() => setProfileModalVisible(false)}
+      >
+        <SafeAreaView style={styles.fullModalSafeDark}>
+          <View style={styles.profileHeaderDark}>
+            <TouchableOpacity style={styles.topIconHit} onPress={() => setProfileModalVisible(false)}>
+              <Feather name="x" size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={styles.profileIdentityRow}>
+              <View style={styles.profileAvatarLarge}>
+                <Ionicons name="person-outline" size={26} color="#FFFFFF" />
+              </View>
+              <Text style={styles.profileNameDark}>Victor Hugo</Text>
+            </View>
+
+            <Text style={styles.bankDataTextDark}>Agência 0001 • Conta 8472910-5</Text>
+            <Text style={styles.bankDataSubDark}>Banco 0260 • Nu Pagamentos S.A. - Instituição de Pagamento</Text>
+          </View>
+
+          <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+            <View style={styles.profileMenuItemDark}>
+              <View style={styles.assistantLeft}>
+                <Ionicons name="shield-checkmark-outline" size={22} color="#FFFFFF" />
+                <View style={{ marginLeft: 14 }}>
+                  <Text style={styles.prefRowTextNoMarginDark}>Modo Rua</Text>
+                  <Text style={styles.planningItemSub}>Limita transferências fora de casa</Text>
+                </View>
+              </View>
+              <Switch
+                value={streetMode}
+                onValueChange={setStreetMode}
+                trackColor={{ false: '#3A3A3C', true: '#7A00C7' }}
+                thumbColor={streetMode ? '#FFFFFF' : '#8E8E93'}
+              />
+            </View>
+
+            {[
+              { title: 'Me ajuda', icon: 'help-circle-outline' },
+              { title: 'Meus dados', icon: 'person-outline' },
+              { title: 'Configurar app', icon: 'settings-outline' },
+              { title: 'Segurança', icon: 'lock-closed-outline' },
+              { title: 'Configurar chaves Pix', icon: 'key-outline' },
+              { title: 'Abrir conta PJ', icon: 'storefront-outline' },
+              { title: 'Documentos e informes', icon: 'document-text-outline' },
+            ].map((item, i) => (
+              <TouchableOpacity key={i} style={styles.profileMenuItemDark} activeOpacity={0.7}>
+                <View style={styles.assistantLeft}>
+                  <Ionicons name={item.icon} size={22} color="#FFFFFF" />
+                  <Text style={styles.prefRowTextDark}>{item.title}</Text>
+                </View>
+                <Feather name="chevron-right" size={20} color={NU.muted} />
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              style={styles.logoutBtnDark}
+              activeOpacity={0.75}
+              onPress={() => setProfileModalVisible(false)}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.logoutBtnTextDark}>Sair do aplicativo</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  root: {
     flex: 1,
     backgroundColor: '#7A00C7',
   },
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  scrollView: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 110,
+  },
+
+  // TELA DE BLOQUEIO / BIOMETRIA
   lockScreen: {
     flex: 1,
     backgroundColor: '#000000',
@@ -673,11 +1566,16 @@ const styles = StyleSheet.create({
     color: '#C4C4C6',
     fontSize: 14,
   },
+
+  // HEADER ROXO NUBANK 2026
   header: {
     backgroundColor: '#7A00C7',
     paddingHorizontal: 20,
     paddingTop: Platform.OS === 'android' ? 36 : 14,
     paddingBottom: 22,
+  },
+  headerCompact: {
+    paddingBottom: 16,
   },
   headerTop: {
     flexDirection: 'row',
@@ -716,7 +1614,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.3,
   },
-  feedContainer: {
+
+  // FEED ESCURO OLED
+  feedSheetDark: {
     flex: 1,
     backgroundColor: '#000000',
   },
@@ -731,10 +1631,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
   },
-  rowAlign: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -746,6 +1642,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
     letterSpacing: -0.4,
+  },
+  maskedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   recentContactsRow: {
     flexDirection: 'row',
@@ -769,6 +1669,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+
+  // CARROSSEL DE AÇÕES CIRCULARES
   actionsCarousel: {
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -811,6 +1713,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 16,
   },
+
+  // BOTÃO MEUS CARTÕES
   myCardsButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -828,6 +1732,8 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     marginLeft: 14,
   },
+
+  // CARROSSEL INFORMATIVOS
   promoCarousel: {
     paddingHorizontal: 16,
     paddingBottom: 22,
@@ -868,6 +1774,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 12,
   },
+
   sectionDivider: {
     height: 1,
     backgroundColor: '#1A1A1E',
@@ -876,6 +1783,10 @@ const styles = StyleSheet.create({
   cardSection: {
     paddingHorizontal: 20,
     paddingVertical: 20,
+  },
+  rowAlign: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   circleIconSmall: {
     width: 32,
@@ -933,6 +1844,10 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     marginLeft: 12,
   },
+  assistantLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   newBadgePill: {
     backgroundColor: '#6E1FA3',
     paddingHorizontal: 8,
@@ -944,6 +1859,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+
+  // CÁPSULA FLUTUANTE INFERIOR
   floatingNavContainer: {
     position: 'absolute',
     bottom: 22,
@@ -970,119 +1887,8 @@ const styles = StyleSheet.create({
   floatingTabItemActive: {
     backgroundColor: '#6E1FA3',
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalCard: {
-    backgroundColor: '#161618',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 40,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalCloseBtn: {
-    padding: 4,
-  },
-  modalHeading: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  modalNotice: {
-    fontSize: 14,
-    color: '#8E8E93',
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  modalActionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#242428',
-  },
-  modalActionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#261738',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-  },
-  modalActionTexts: {
-    flex: 1,
-  },
-  modalActionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 2,
-  },
-  modalActionSub: {
-    fontSize: 12,
-    color: '#8E8E93',
-  },
-  cardRowItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1C1C1E',
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 12,
-  },
-  cardGraphicPurple: {
-    width: 48,
-    height: 32,
-    borderRadius: 6,
-    backgroundColor: '#820AD1',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 4,
-  },
-  cardGraphicDark: {
-    width: 48,
-    height: 32,
-    borderRadius: 6,
-    backgroundColor: '#2A2A2E',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 4,
-  },
-  cardBrandMini: {
-    color: '#FFFFFF',
-    fontWeight: '900',
-    fontSize: 10,
-  },
-  cardBrandMiniDark: {
-    color: '#8E8E93',
-    fontWeight: '900',
-    fontSize: 10,
-  },
-  cardInfoCol: {
-    flex: 1,
-    marginLeft: 14,
-  },
-  cardRowTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  cardRowNumber: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 2,
-  },
+
+  // TELA DE TRANSFERÊNCIA AGENDAMENTO
   transferScreenContainer: {
     flex: 1,
     backgroundColor: '#FFFFFF',
@@ -1158,6 +1964,9 @@ const styles = StyleSheet.create({
     color: '#111111',
   },
   fieldDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 14,
     borderTopWidth: 1,
     borderTopColor: '#F0F1F5',
@@ -1165,6 +1974,11 @@ const styles = StyleSheet.create({
   fieldLabelMuted: {
     fontSize: 14,
     color: '#8E8E93',
+  },
+  fieldValueSmall: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111111',
   },
   transferBottomContainer: {
     paddingHorizontal: 24,
@@ -1184,5 +1998,637 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+
+  // MODAIS FULLSCREEN DARK
+  fullModalSafeDark: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  fullModalTopBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  topIconHit: {
+    padding: 6,
+  },
+  fullModalPad: {
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 40,
+  },
+  nuBigTitleDark: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.6,
+    marginBottom: 8,
+  },
+  nuBigSubtitleDark: {
+    fontSize: 15,
+    color: '#8E8E93',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  pixGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  pixGridItem: {
+    width: '31%',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  pixGridCircleDark: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#1C1C1E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  pixGridLabelDark: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  prefHeaderDark: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8E8E93',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  prefRowDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1A1E',
+  },
+  prefRowTextDark: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginLeft: 14,
+  },
+  prefRowTextNoMarginDark: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+
+  // PIX TRANSFER FLOW DARK
+  pixFlowWrap: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 28,
+    justifyContent: 'space-between',
+  },
+  currencyInputRowDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#2C2C2E',
+    paddingBottom: 10,
+    marginTop: 8,
+  },
+  currencyPrefixDark: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginRight: 8,
+  },
+  currencyInputDark: {
+    flex: 1,
+    fontSize: 34,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    padding: 0,
+  },
+  quickAmountsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 18,
+  },
+  quickAmountChipDark: {
+    backgroundColor: '#1C1C1E',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  quickAmountTextDark: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  fabNextBtn: {
+    alignSelf: 'flex-end',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#820AD1',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fabNextBtnDisabled: {
+    backgroundColor: '#2C2C2E',
+  },
+  underlineInputDark: {
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#2C2C2E',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    paddingVertical: 12,
+  },
+  confirmPixBtn: {
+    backgroundColor: '#820AD1',
+    borderRadius: 26,
+    paddingVertical: 15,
+    alignItems: 'center',
+    marginTop: 22,
+  },
+  confirmPixBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  contactRowDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1A1E',
+  },
+  contactInitialsText: {
+    color: '#00C49F',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  contactNameDark: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  contactBankDark: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  receiptBadge: {
+    marginBottom: 14,
+  },
+  receiptBoxDark: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 14,
+    padding: 18,
+  },
+  receiptRowDark: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2C2C2E',
+  },
+  receiptLabelDark: {
+    fontSize: 13.5,
+    color: '#8E8E93',
+  },
+  receiptValDark: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  receiptValBoldDark: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  receiptIdDark: {
+    fontSize: 11,
+    color: '#8E8E93',
+    maxWidth: '60%',
+    textAlign: 'right',
+  },
+
+  // CONTA / EXTRATO DARK
+  accountBigBalanceDark: {
+    fontSize: 30,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.6,
+    marginBottom: 14,
+  },
+  accountDetailRowDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+  },
+  detailRowSubDark: {
+    fontSize: 13,
+    color: '#8E8E93',
+  },
+  detailRowValDark: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginTop: 2,
+  },
+  txRowDark: {
+    flexDirection: 'row',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1A1E',
+  },
+  txIconCircleDark: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1C1C1E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  txTopLine: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  txTitleDark: {
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  txDateDark: {
+    fontSize: 12,
+    color: '#8E8E93',
+  },
+  txSubDark: {
+    fontSize: 13.5,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  txAmountDark: {
+    fontSize: 14.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginTop: 4,
+  },
+
+  // FATURA & CARTÃO
+  invoiceStatusTag: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#009EE3',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  limitBarTrackDark: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#00C49F',
+    flexDirection: 'row',
+    overflow: 'hidden',
+    marginTop: 16,
+  },
+  limitBarUsed: {
+    backgroundColor: '#009EE3',
+    height: '100%',
+  },
+  limitBarFreeDark: {
+    flex: 1,
+    backgroundColor: '#00C49F',
+  },
+
+  // MEUS CARTÕES DARK
+  cardsGroupTitleDark: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#8E8E93',
+    marginBottom: 12,
+  },
+  cardListItemDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1C1C1E',
+    padding: 16,
+    borderRadius: 14,
+    marginBottom: 10,
+  },
+  cardMiniDark: {
+    width: 52,
+    height: 34,
+    borderRadius: 6,
+    backgroundColor: '#2A2A2E',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  cardMiniPurple: {
+    width: 52,
+    height: 34,
+    borderRadius: 6,
+    backgroundColor: '#820AD1',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  cardMiniLogoDark: {
+    color: '#A1A1AA',
+    fontWeight: '900',
+    fontSize: 12,
+  },
+  cardMiniLogoLight: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 12,
+  },
+  cardTitleDark: {
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  cardMaskDark: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  blockBtnDark: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#2C2C2E',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  blockBtnActive: {
+    backgroundColor: '#E02424',
+  },
+  createCardBtnDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#261738',
+    paddingVertical: 15,
+    borderRadius: 26,
+    marginTop: 14,
+  },
+  createCardBtnTextDark: {
+    color: '#FFFFFF',
+    fontSize: 14.5,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+
+  // PERFIL DARK
+  profileHeaderDark: {
+    backgroundColor: '#161618',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 22,
+  },
+  profileIdentityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    marginBottom: 14,
+  },
+  profileAvatarLarge: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#261738',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  profileNameDark: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  bankDataTextDark: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  bankDataSubDark: {
+    fontSize: 12.5,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  profileMenuItemDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1A1A1E',
+  },
+  logoutBtnDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1C1C1E',
+    marginHorizontal: 24,
+    marginTop: 24,
+    paddingVertical: 15,
+    borderRadius: 26,
+  },
+  logoutBtnTextDark: {
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginLeft: 8,
+  },
+
+  // ABA PLANEJAMENTO & SHOPPING DARK
+  tabHeroTitle: {
+    fontSize: 21,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 16,
+    letterSpacing: -0.4,
+  },
+  planningRowCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1C1C1E',
+    padding: 16,
+    borderRadius: 14,
+    marginBottom: 10,
+  },
+  planningRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  planningIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#2C2C2E',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  planningItemTitle: {
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  planningItemSub: {
+    fontSize: 12.5,
+    color: '#8E8E93',
+    marginTop: 2,
+  },
+  planningValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  caixinhasGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  caixinhaCard: {
+    width: (width - 56) / 2,
+    backgroundColor: '#1C1C1E',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  caixinhaBanner: {
+    height: 62,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  caixinhaName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  caixinhaVal: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  caixinhaYield: {
+    fontSize: 11.5,
+    color: '#00C49F',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  searchBoxDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1C1C1E',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    height: 46,
+  },
+  searchPlaceholderDark: {
+    marginLeft: 10,
+    color: '#8E8E93',
+    fontSize: 14,
+  },
+  searchInputDark: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  shopBannerDark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#530082',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 18,
+  },
+  shopBannerTag: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  shopBannerTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 22,
+    marginBottom: 4,
+  },
+  shopBannerSub: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12.5,
+  },
+  storesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  storeCardDark: {
+    width: (width - 56) / 2,
+    backgroundColor: '#1C1C1E',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+  },
+  storeLogoBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  storeLogoLetter: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  storeNameDark: {
+    fontSize: 14.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 6,
+  },
+  cashbackPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#261738',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  cashbackPillText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#820AD1',
   },
 });
