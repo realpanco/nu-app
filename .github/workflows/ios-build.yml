@@ -8,7 +8,7 @@ on:
 jobs:
   build-unsigned-ipa:
     name: Compilar IPA (Xcode macOS)
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
